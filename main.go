@@ -4,10 +4,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"sync_demp/server"
+	"sync_demo/server"
 )
-
-
 
 func main() {
 	go server.Run()
@@ -33,6 +31,6 @@ func startBrower() *exec.Cmd {
 
 func listenToInterrupt() chan os.Signal {
 	chSignal := make(chan os.Signal, 1)
-	signal.Notify(chSignal, os.Interrupt)  // Ctrl C 触发中断, 信号写入channel
+	signal.Notify(chSignal, os.Interrupt) // Ctrl C 触发中断, 信号写入channel
 	return chSignal
 }

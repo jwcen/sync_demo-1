@@ -3,18 +3,13 @@ package server
 import (
 	"embed"
 	"io/fs"
-	"io/ioutil"
 	"log"
-	"net"
 	"net/http"
-	"os"
-	"path"
-	"path/filepath"
 	"strings"
 
+	"sync_demo/server/controller"
+
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
-	"github.com/skip2/go-qrcode"
 )
 
 //go:embed frontend/dist/*
@@ -30,15 +25,15 @@ func Run() {
 		r.StaticFS("/static", http.FS(staticFiles))
 
 		// 上传文本
-		r.POST("/api/v1/texts", TextController)
+		r.POST("/api/v1/texts", controller.TextController)
 		// 获取局域网地址
-		r.GET("/api/v1/addresses", AddressesController)
+		r.GET("/api/v1/addresses", controller.AddressesController)
 		// 文件下载
-		r.GET("/uploads/:path", UploadsController)
+		r.GET("/uploads/:path", controller.UploadsController)
 		// 生成二维码
-		r.GET("/api/v1/qrcodes", QrcodesController)
+		r.GET("/api/v1/qrcodes", controller.QrcodesController)
 		// 文件上传
-		r.POST("/api/v1/files", FilesController)
+		r.POST("/api/v1/files", controller.FilesController)
 
 		r.NoRoute(func(c *gin.Context) {
 			path := c.Request.URL.Path
@@ -63,127 +58,4 @@ func Run() {
 
 		r.Run(port)
 	}()
-}
-
-func FilesController(c *gin.Context) {
-	file, err := c.FormFile("raw")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	exe, err := os.Executable()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	dir := filepath.Dir(exe)
-	filename := uuid.New().String()
-	uploads := filepath.Join(dir, "uploads")
-	err = os.MkdirAll(uploads, os.ModePerm)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	fullpath := path.Join("uploads", filename+filepath.Ext(file.Filename))
-	err = c.SaveUploadedFile(file, filepath.Join(dir, fullpath))
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"url": "/" + fullpath,
-	})
-}
-
-func QrcodesController(c *gin.Context) {
-	if content := c.Query("content"); content != "" {
-		png, err := qrcode.Encode(content, qrcode.Medium, 256)
-		if err != nil {
-			log.Fatal(err)
-		}
-		// 不用c.File是因为二维码不需要下载，展示作用
-		c.Data(http.StatusOK, "image/png", png)
-	} else {
-		c.Status(http.StatusBadRequest)
-	}
-}
-
-func GetUploadsDir() (dir, uploads string) {
-	// Executable 返回启动当前进程的可执行文件的路径
-	// /home/cenjw/synk/synk.exe
-	exe, err := os.Executable()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// 返回可执行文件的目录
-	// /home/cenjw/synk/
-	dir = filepath.Dir(exe)
-	// 拼接上传路径：/home/cenjw/synk/uploads
-	uploads = filepath.Join(dir, "uploads")
-	return
-}
-
-func UploadsController(c *gin.Context) {
-	if path := c.Param("path"); path != "" {
-		_, uploads := GetUploadsDir()
-		target := filepath.Join(uploads, path)
-		c.Header("Content-Description", "File Transfer")
-		c.Header("Content-Transfer-Encoding", "binary")
-		c.Header("Content-Disposition", "attachment; filename="+path)
-		c.Header("Content-Type", "application/octet-stream")
-		// writes the specified file into the body stream in an efficient way
-		c.File(target)
-	} else {
-		c.Status(http.StatusNotFound)
-	}
-}
-
-func AddressesController(c *gin.Context) {
-	addrs, _ := net.InterfaceAddrs()
-	var result []string
-	for _, address := range addrs {
-		// check the address type and if it is not a loopback the display it
-		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-			if ipnet.IP.To4() != nil {
-				result = append(result, ipnet.IP.String())
-			}
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"addresses": result,
-	})
-}
-
-func TextController(c *gin.Context) {
-	var json struct {
-		Raw string `json:"raw"`
-	}
-
-	if err := c.ShouldBindJSON(&json); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-	} else {
-		dir, uploads := GetUploadsDir()
-		// 生成一个随机文件名：haitaos-hsjdfhk-sfhsk
-		filename := uuid.New().String()
-		// 创建目录
-		err = os.MkdirAll(uploads, os.ModePerm)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		// 拼接上传文件的全路径：/home/cenjw/synk/uploads/haitaos-hsjdfhk-sfhsk.txt
-		fullpath := path.Join("uploads", filename+".txt")
-		// 将用户传来的json.Raw数据写入文件
-		err = ioutil.WriteFile(filepath.Join(dir, fullpath), []byte(json.Raw), 0644)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		// 返回全路径给前端
-		c.JSON(http.StatusOK, gin.H{
-			"url": "/" + fullpath,
-		})
-	}
 }
