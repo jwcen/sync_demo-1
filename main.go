@@ -16,25 +16,31 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/skip2/go-qrcode"
 )
 
 //go:embed frontend/dist/*
 var FS embed.FS
 
 func main() {
+	port := ":27149"
+	// 启动Gin服务
 	go func() {
 		gin.SetMode(gin.DebugMode)
 		r := gin.Default()
 		staticFiles, _ := fs.Sub(FS, "frontend/dist")
 		r.StaticFS("/static", http.FS(staticFiles))
 
-		// 上传文件
-		r.POST("api/v1/texts", TextController)
+		// 上传文本
+		r.POST("/api/v1/texts", TextController)
 		// 获取局域网地址
-		r.GET("api/v1/addresses", AddressesController)
+		r.GET("/api/v1/addresses", AddressesController)
 		// 文件下载
-		r.GET("api/v1/")
-
+		r.GET("/uploads/:path", UploadsController)
+		// 生成二维码
+		r.GET("/api/v1/qrcodes", QrcodesController)
+		// 文件上传
+		r.POST("/api/v1/files", FilesController)
 
 		r.NoRoute(func(c *gin.Context) {
 			path := c.Request.URL.Path
@@ -57,13 +63,14 @@ func main() {
 			}
 		})
 
-		r.Run(":8080")
+		r.Run(port)
 	}()
 
 	chromePath := "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
-	cmd := exec.Command(chromePath, "--app=http://127.0.0.1:8080/static/index.html")
+	cmd := exec.Command(chromePath, "--app=http://127.0.0.1"+ port +"/static/index.html")
 	cmd.Start()
 
+	// 监听中断信号
 	chSignal := make(chan os.Signal, 1)
 	signal.Notify(chSignal, os.Interrupt)  // Ctrl C 触发中断, 信号写入channel
 
@@ -71,6 +78,50 @@ func main() {
 	select {
 	case <-chSignal:
 		cmd.Process.Kill()
+	}
+}
+
+func FilesController(c *gin.Context) {
+	file, err := c.FormFile("raw")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	dir := filepath.Dir(exe)
+	filename := uuid.New().String()
+	uploads := filepath.Join(dir, "uploads")
+	err = os.MkdirAll(uploads, os.ModePerm)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fullpath := path.Join("uploads", filename + filepath.Ext(file.Filename))
+	err = c.SaveUploadedFile(file, filepath.Join(dir, fullpath))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"url": "/" + fullpath,
+	})
+}
+
+
+func QrcodesController(c *gin.Context) {
+	if content := c.Query("content"); content != "" {
+		png, err := qrcode.Encode(content, qrcode.Medium, 256)
+		if err != nil {
+			log.Fatal(err)
+		}
+		// 不用c.File是因为二维码不需要下载，展示作用
+		c.Data(http.StatusOK, "image/png", png)
+	} else {
+		c.Status(http.StatusBadRequest)
 	}
 }
 
